@@ -1,13 +1,22 @@
 import 'package:flutter/material.dart';
-import 'services/supabase_service.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
-import 'models/contributor.dart';
+import 'screens/onboarding_screen.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await SupabaseService.init();
-  runApp(const GujaratiDialectApp());
+  
+  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
+  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  
+  await Supabase.initialize(
+    url: supabaseUrl,
+    publishableKey: supabaseAnonKey,
+  );
+  
+  runApp(const ProviderScope(child: GujaratiDialectApp()));
 }
 
 class GujaratiDialectApp extends StatelessWidget {
@@ -27,39 +36,44 @@ class GujaratiDialectApp extends StatelessWidget {
   }
 }
 
-class AuthGate extends StatefulWidget {
+class AuthGate extends ConsumerWidget {
   const AuthGate({super.key});
 
   @override
-  State<AuthGate> createState() => _AuthGateState();
-}
-
-class _AuthGateState extends State<AuthGate> {
-  late Future<Contributor?> _profileFuture;
-
-  @override
-  void initState() {
-    super.initState();
-    _profileFuture = SupabaseService.instance.getOperatorProfile();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return FutureBuilder<Contributor?>(
-      future: _profileFuture,
+  Widget build(BuildContext context, WidgetRef ref) {
+    return StreamBuilder<AuthState>(
+      stream: Supabase.instance.client.auth.onAuthStateChange,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-        
-        // If they have a profile, go to Home. Otherwise, Login.
-        if (snapshot.hasData && snapshot.data != null) {
-          return const HomeScreen();
-        } else {
-          return const LoginScreen();
+        final session = snapshot.data?.session;
+        if (session == null) {
+          return const LoginScreen(); // We will rename/update LoginScreen to AuthScreen
         }
+
+        return FutureBuilder<dynamic>(
+          future: Supabase.instance.client
+              .from('profiles')
+              .select()
+              .eq('id', session.user.id)
+              .maybeSingle(),
+          builder: (context, profileSnapshot) {
+            if (profileSnapshot.connectionState == ConnectionState.waiting) {
+              return const Scaffold(body: Center(child: CircularProgressIndicator()));
+            }
+            if (profileSnapshot.hasError) {
+              return Scaffold(body: Center(child: Text('Error: ${profileSnapshot.error}')));
+            }
+            
+            final data = profileSnapshot.data;
+            if (data == null) {
+              return const OnboardingScreen();
+            } else {
+              return const HomeScreen();
+            }
+          },
+        );
       },
     );
   }

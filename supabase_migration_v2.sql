@@ -1,7 +1,9 @@
+-- MIGRATION V2: Upgrade path for existing DB
+
 -- 1. ENUMS & EXTENSIONS
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
--- 2. DIALECTS
+-- 2. DIALECTS (New)
 CREATE TABLE IF NOT EXISTS dialects (
     id SERIAL PRIMARY KEY,
     slug TEXT UNIQUE NOT NULL,
@@ -22,7 +24,7 @@ INSERT INTO dialects (slug, name_en, name_gu, sort_order) VALUES
 ('unsure', 'Unsure', 'અચોક્કસ', 99)
 ON CONFLICT (slug) DO NOTHING;
 
--- 3. DISTRICTS
+-- 3. DISTRICTS (New)
 CREATE TABLE IF NOT EXISTS districts (
     id SERIAL PRIMARY KEY,
     name_en TEXT NOT NULL,
@@ -45,7 +47,7 @@ INSERT INTO districts (name_en, name_gu, state) VALUES
 ('Outside Gujarat', 'ગુજરાત બહાર', 'Other')
 ON CONFLICT DO NOTHING;
 
--- 4. PROFILES
+-- 4. PROFILES (New)
 CREATE TABLE IF NOT EXISTS profiles (
     id UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
     display_name TEXT NOT NULL,
@@ -59,7 +61,6 @@ CREATE TABLE IF NOT EXISTS profiles (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Trigger to prevent users from updating their own is_admin status
 CREATE OR REPLACE FUNCTION prevent_is_admin_update() RETURNS trigger AS $$
 BEGIN
     IF NEW.is_admin IS DISTINCT FROM OLD.is_admin AND current_user IN ('authenticator', 'anon') THEN
@@ -75,7 +76,11 @@ CREATE TRIGGER trg_prevent_is_admin_update
     FOR EACH ROW EXECUTE FUNCTION prevent_is_admin_update();
 
 -- 5. PROMPTS
-CREATE TABLE IF NOT EXISTS prompts (
+-- The old prompts table wasn't actively used since prompts were in prompts.dart. 
+-- We drop and recreate it for the new schema.
+DROP TABLE IF EXISTS prompts CASCADE;
+
+CREATE TABLE prompts (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     text_gu TEXT NOT NULL CHECK (length(text_gu) >= 5 AND length(text_gu) <= 200),
     standard_equivalent_gu TEXT,
@@ -93,10 +98,8 @@ DECLARE
     total_chars INT;
     recent_count INT;
 BEGIN
-    -- Normalize text
     NEW.text_norm = lower(regexp_replace(trim(normalize(NEW.text_gu, NFC)), '\s+', ' ', 'g'));
     
-    -- Check Gujarati block ratio (U+0A80 to U+0AFF)
     total_chars := length(regexp_replace(NEW.text_norm, '\s', '', 'g'));
     IF total_chars > 0 THEN
         guj_chars := length(regexp_replace(NEW.text_norm, '[^઀-૿]', '', 'g'));
@@ -105,7 +108,6 @@ BEGIN
         END IF;
     END IF;
 
-    -- Rate limit check (20 prompts per 24h) if user submitted
     IF NEW.submitted_by IS NOT NULL THEN
         SELECT count(*) INTO recent_count FROM prompts 
         WHERE submitted_by = NEW.submitted_by AND created_at > (now() - interval '24 hours');
@@ -118,12 +120,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS trg_validate_prompt ON prompts;
 CREATE TRIGGER trg_validate_prompt
     BEFORE INSERT OR UPDATE ON prompts
     FOR EACH ROW EXECUTE FUNCTION validate_and_normalize_prompt();
 
--- 6. PROMPT REPORTS
+-- 6. PROMPT REPORTS (New)
 CREATE TABLE IF NOT EXISTS prompt_reports (
     prompt_id UUID REFERENCES prompts(id) ON DELETE CASCADE,
     reporter_id UUID REFERENCES auth.users(id) ON DELETE CASCADE,
@@ -144,37 +145,11 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql SECURITY DEFINER;
 
-DROP TRIGGER IF EXISTS trg_check_prompt_flags ON prompt_reports;
 CREATE TRIGGER trg_check_prompt_flags
     AFTER INSERT ON prompt_reports
     FOR EACH ROW EXECUTE FUNCTION check_prompt_flags();
 
--- 7. RECORDINGS
-CREATE TABLE IF NOT EXISTS recordings (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    -- Legacy columns
-    operator_id TEXT,
-    prompt TEXT,
-    speaker_name TEXT,
-    speaker_age INT,
-    speaker_place TEXT,
-    speaker_dialect TEXT,
-    -- New columns
-    user_id UUID REFERENCES auth.users(id),
-    prompt_id UUID REFERENCES prompts(id),
-    prompt_text TEXT,
-    dialect_id INT REFERENCES dialects(id),
-    dialect_other_text TEXT,
-    district_id INT REFERENCES districts(id),
-    duration_ms INT,
-    sample_rate INT,
-    channels INT,
-    audio_format TEXT CHECK (audio_format IN ('wav', 'm4a')),
-    storage_path TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Seed initial prompts from the dart file (standard dialect)
+-- Seed standard prompts
 DO $$
 DECLARE
     std_id INT;
@@ -195,7 +170,35 @@ BEGIN
     END IF;
 END $$;
 
--- 8. ROW LEVEL SECURITY (RLS)
+
+-- 7. RECORDINGS MIGRATION
+-- Add new columns, keeping legacy columns
+ALTER TABLE recordings
+    ALTER COLUMN operator_id DROP NOT NULL,
+    ALTER COLUMN prompt DROP NOT NULL,
+    ALTER COLUMN speaker_name DROP NOT NULL,
+    ALTER COLUMN speaker_age DROP NOT NULL,
+    ALTER COLUMN speaker_place DROP NOT NULL,
+    ALTER COLUMN speaker_dialect DROP NOT NULL,
+    ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES auth.users(id),
+    ADD COLUMN IF NOT EXISTS prompt_id UUID REFERENCES prompts(id),
+    ADD COLUMN IF NOT EXISTS prompt_text TEXT,
+    ADD COLUMN IF NOT EXISTS dialect_id INT REFERENCES dialects(id),
+    ADD COLUMN IF NOT EXISTS dialect_other_text TEXT,
+    ADD COLUMN IF NOT EXISTS district_id INT REFERENCES districts(id),
+    ADD COLUMN IF NOT EXISTS duration_ms INT,
+    ADD COLUMN IF NOT EXISTS sample_rate INT,
+    ADD COLUMN IF NOT EXISTS channels INT,
+    ADD COLUMN IF NOT EXISTS audio_format TEXT CHECK (audio_format IN ('wav', 'm4a'));
+
+-- Best-effort backfill dialect_id from legacy speaker_dialect
+UPDATE recordings r
+SET dialect_id = d.id
+FROM dialects d
+WHERE r.dialect_id IS NULL AND lower(r.speaker_dialect) = d.slug;
+
+
+-- 8. RLS UPDATES
 ALTER TABLE dialects ENABLE ROW LEVEL SECURITY;
 ALTER TABLE districts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
@@ -203,41 +206,38 @@ ALTER TABLE prompts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prompt_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recordings ENABLE ROW LEVEL SECURITY;
 
--- Dialects & Districts: Select for authenticated
+-- Drop old policies on recordings
+DROP POLICY IF EXISTS "Allow insert own recordings" ON recordings;
+DROP POLICY IF EXISTS "Allow read own recordings" ON recordings;
+
+-- New Policies
 CREATE POLICY "Allow select on dialects for authenticated" ON dialects FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Allow select on districts for authenticated" ON districts FOR SELECT TO authenticated USING (true);
 
--- Profiles
 CREATE POLICY "Allow users to read own profile" ON profiles FOR SELECT TO authenticated USING (auth.uid() = id);
 CREATE POLICY "Allow admins to read all profiles" ON profiles FOR SELECT TO authenticated USING ((SELECT is_admin FROM profiles WHERE id = auth.uid()));
 CREATE POLICY "Allow users to insert own profile" ON profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
 CREATE POLICY "Allow users to update own profile" ON profiles FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
--- Prompts
 CREATE POLICY "Allow authenticated to read approved prompts" ON prompts FOR SELECT TO authenticated USING (status = 'approved');
 CREATE POLICY "Allow authenticated to read own prompts" ON prompts FOR SELECT TO authenticated USING (auth.uid() = submitted_by);
 CREATE POLICY "Allow authenticated to insert prompts" ON prompts FOR INSERT TO authenticated WITH CHECK (auth.uid() = submitted_by);
 CREATE POLICY "Allow admins to read all prompts" ON prompts FOR SELECT TO authenticated USING ((SELECT is_admin FROM profiles WHERE id = auth.uid()));
 
--- Prompt Reports
 CREATE POLICY "Allow users to insert own reports" ON prompt_reports FOR INSERT TO authenticated WITH CHECK (auth.uid() = reporter_id);
 
--- Recordings
 CREATE POLICY "Allow users to read own recordings" ON recordings FOR SELECT TO authenticated USING (auth.uid() = user_id);
 CREATE POLICY "Allow users to delete own recordings" ON recordings FOR DELETE TO authenticated USING (auth.uid() = user_id);
 CREATE POLICY "Allow users to insert own recordings" ON recordings FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
 CREATE POLICY "Allow admins to read all recordings" ON recordings FOR SELECT TO authenticated USING ((SELECT is_admin FROM profiles WHERE id = auth.uid()));
 CREATE POLICY "Allow admins to read legacy recordings" ON recordings FOR SELECT TO authenticated USING (user_id IS NULL AND (SELECT is_admin FROM profiles WHERE id = auth.uid()));
 
--- 9. STORAGE
-INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('audio-clips', 'audio-clips', false, 5242880, ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4'])
-ON CONFLICT (id) DO UPDATE SET 
-    public = false, 
-    file_size_limit = 5242880, 
-    allowed_mime_types = ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4'];
+-- 9. STORAGE UPDATES
+UPDATE storage.buckets 
+SET public = false, file_size_limit = 5242880, allowed_mime_types = ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4']
+WHERE id = 'audio-clips';
 
--- Storage Object Policies
+-- Replace storage policies
 DROP POLICY IF EXISTS "Allow upload of audio clips" ON storage.objects;
 DROP POLICY IF EXISTS "Allow public read of audio clips" ON storage.objects;
 

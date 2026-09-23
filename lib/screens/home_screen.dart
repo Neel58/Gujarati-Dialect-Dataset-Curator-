@@ -1,30 +1,81 @@
 import 'package:flutter/material.dart';
-import '../data/prompts.dart';
-import '../services/supabase_service.dart';
-import 'speaker_select_screen.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/models.dart';
 import 'review_screen.dart';
-import 'edit_profile_screen.dart';
+import 'record_screen.dart';
+import 'onboarding_screen.dart'; // for dialect provider
+import 'add_prompt_screen.dart';
 
-class HomeScreen extends StatelessWidget {
+final promptsProvider = FutureProvider<List<Prompt>>((ref) async {
+  final data = await Supabase.instance.client
+      .from('prompts')
+      .select()
+      .eq('status', 'approved');
+  return data.map((json) => Prompt.fromJson(json)).toList();
+});
+
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
-  void _editProfile(BuildContext context) async {
-    final profile = await SupabaseService.instance.getOperatorProfile();
-    if (profile == null) {
-      if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Operator profile not found.')),
-      );
+  @override
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
+}
+
+class _HomeScreenState extends ConsumerState<HomeScreen> {
+  int? _selectedDialectFilter;
+  Profile? _cachedProfile;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchProfile();
+  }
+
+  Future<void> _fetchProfile() async {
+    final user = Supabase.instance.client.auth.currentUser;
+    if (user == null) return;
+    final data = await Supabase.instance.client.from('profiles').select().eq('id', user.id).maybeSingle();
+    if (data != null && mounted) {
+      setState(() {
+        _cachedProfile = Profile.fromJson(data);
+      });
+    }
+  }
+
+  void _editProfile(BuildContext context) {
+    if (_cachedProfile == null) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Profile loading...')));
       return;
     }
-    if (!context.mounted) return;
     Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => EditProfileScreen(currentProfile: profile)),
-    );
+      MaterialPageRoute(builder: (_) => OnboardingScreen(currentProfile: _cachedProfile!)),
+    ).then((_) => _fetchProfile());
+  }
+  
+  void _reportPrompt(Prompt prompt) async {
+    try {
+      final user = Supabase.instance.client.auth.currentUser;
+      if (user == null) return;
+      await Supabase.instance.client.from('prompt_reports').insert({
+        'prompt_id': prompt.id,
+        'reporter_id': user.id,
+        'reason': 'Flagged by user',
+      });
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Prompt reported.')));
+      ref.invalidate(promptsProvider);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Failed to report: $e')));
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final promptsAsync = ref.watch(promptsProvider);
+    final dialectsAsync = ref.watch(dialectsProvider);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Gujarati Dialect Curator'),
@@ -36,31 +87,134 @@ class HomeScreen extends StatelessWidget {
           ),
           IconButton(
             icon: const Icon(Icons.list_alt),
-            tooltip: 'Review uploads',
+            tooltip: 'My Uploads',
             onPressed: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const ReviewScreen()),
             ),
           ),
         ],
       ),
-      body: ListView.separated(
-        padding: const EdgeInsets.all(12),
-        itemCount: PromptBank.prompts.length,
-        separatorBuilder: (_, __) => const SizedBox(height: 8),
-        itemBuilder: (context, index) {
-          final prompt = PromptBank.prompts[index];
-          return Card(
-            child: ListTile(
-              title: Text(prompt, style: const TextStyle(fontSize: 18)),
-              trailing: const Icon(Icons.mic),
-              onTap: () => Navigator.of(context).push(
-                MaterialPageRoute(
-                  builder: (_) => SpeakerSelectScreen(prompt: prompt),
-                ),
+      floatingActionButton: FloatingActionButton(
+        child: const Icon(Icons.add),
+        onPressed: () async {
+          if (_cachedProfile == null) return;
+          await Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => AddPromptScreen(profile: _cachedProfile!)),
+          );
+          ref.invalidate(promptsProvider);
+        },
+      ),
+      body: Column(
+        children: [
+          dialectsAsync.when(
+            data: (dialects) => SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              child: Row(
+                children: [
+                  FilterChip(
+                    label: const Text('All'),
+                    selected: _selectedDialectFilter == null,
+                    onSelected: (val) => setState(() => _selectedDialectFilter = null),
+                  ),
+                  const SizedBox(width: 8),
+                  ...dialects.map((d) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: FilterChip(
+                      label: Text(d.nameEn),
+                      selected: _selectedDialectFilter == d.id,
+                      onSelected: (val) => setState(() => _selectedDialectFilter = val ? d.id : null),
+                    ),
+                  )),
+                ],
               ),
             ),
-          );
-        },
+            loading: () => const SizedBox(),
+            error: (_, __) => const SizedBox(),
+          ),
+          Expanded(
+            child: promptsAsync.when(
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (err, _) => Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text('Error loading prompts: $err'),
+                    ElevatedButton(
+                      onPressed: () => ref.invalidate(promptsProvider),
+                      child: const Text('Retry'),
+                    ),
+                  ],
+                ),
+              ),
+              data: (prompts) {
+                var filtered = prompts;
+                if (_selectedDialectFilter != null) {
+                  filtered = filtered.where((p) => p.dialectId == _selectedDialectFilter).toList();
+                }
+                
+                if (filtered.isEmpty) {
+                  return const Center(child: Text('No prompts available.'));
+                }
+                
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    ref.invalidate(promptsProvider);
+                    await ref.read(promptsProvider.future);
+                  },
+                  child: ListView.separated(
+                    padding: const EdgeInsets.all(12),
+                    itemCount: filtered.length,
+                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    itemBuilder: (context, index) {
+                      final prompt = filtered[index];
+                      
+                      String dialectName = '';
+                      dialectsAsync.whenData((dialects) {
+                        final d = dialects.where((e) => e.id == prompt.dialectId).firstOrNull;
+                        if (d != null) dialectName = d.nameEn;
+                      });
+
+                      return Card(
+                        child: ListTile(
+                          title: Text(prompt.textGu, style: const TextStyle(fontSize: 18)),
+                          subtitle: dialectName.isNotEmpty ? Text(dialectName) : null,
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.mic, color: Colors.deepPurple),
+                                onPressed: () {
+                                  if (_cachedProfile == null) return;
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => RecordScreen(prompt: prompt, profile: _cachedProfile!),
+                                    ),
+                                  );
+                                },
+                              ),
+                              PopupMenuButton<String>(
+                                onSelected: (val) {
+                                  if (val == 'report') _reportPrompt(prompt);
+                                },
+                                itemBuilder: (context) => [
+                                  const PopupMenuItem(
+                                    value: 'report',
+                                    child: Text('Report Prompt'),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
       ),
     );
   }
