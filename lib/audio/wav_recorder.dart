@@ -23,7 +23,19 @@ class WavRecorder {
       useWav = await _recorder.isEncoderSupported(AudioEncoder.wav);
     }
 
-    if (useWav) {
+    if (kIsWeb) {
+      await _recorder.start(
+        const RecordConfig(
+          encoder: AudioEncoder.opus,
+          sampleRate: 16000,
+          numChannels: 1,
+          autoGain: false,
+          echoCancel: false,
+          noiseSuppress: false,
+        ),
+        path: _path!,
+      );
+    } else if (useWav) {
       await _recorder.start(
         const RecordConfig(
           encoder: AudioEncoder.wav,
