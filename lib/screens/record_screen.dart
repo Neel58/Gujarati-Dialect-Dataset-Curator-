@@ -174,10 +174,12 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
       if (kIsWeb) {
         final res = await http.get(Uri.parse(_recordedPath!));
         fileBytes = res.bodyBytes;
-        // Spoof as mp4 to bypass strict Supabase bucket constraints on web.
-        // Chrome will mime-sniff the underlying WebM bytes and play it perfectly.
-        contentType = 'audio/mp4';
-        ext = '.mp4';
+        if (res.headers['content-type'] != null) {
+          contentType = res.headers['content-type']!;
+          if (contentType.contains('webm')) ext = '.webm';
+          else if (contentType.contains('mp4')) ext = '.mp4';
+          else if (contentType.contains('ogg')) ext = '.ogg';
+        }
       } else {
         fileBytes = await io.File(_recordedPath!).readAsBytes();
       }
