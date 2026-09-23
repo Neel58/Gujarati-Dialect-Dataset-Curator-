@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/onboarding_screen.dart';
@@ -8,9 +9,24 @@ import 'screens/onboarding_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
-  const supabaseUrl = String.fromEnvironment('SUPABASE_URL');
-  const supabaseAnonKey = String.fromEnvironment('SUPABASE_ANON_KEY');
+  var supabaseUrl = const String.fromEnvironment('SUPABASE_URL');
+  var supabaseAnonKey = const String.fromEnvironment('SUPABASE_ANON_KEY');
   
+  // Fallback for IDEs that don't pass --dart-define
+  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+    try {
+      await dotenv.load(fileName: ".env");
+      supabaseUrl = dotenv.env['SUPABASE_URL'] ?? '';
+      supabaseAnonKey = dotenv.env['SUPABASE_ANON_KEY'] ?? '';
+    } catch (e) {
+      debugPrint('Failed to load .env: $e');
+    }
+  }
+
+  if (supabaseUrl.isEmpty || supabaseAnonKey.isEmpty) {
+    throw Exception('Please provide SUPABASE_URL and SUPABASE_ANON_KEY via --dart-define or .env');
+  }
+
   await Supabase.initialize(
     url: supabaseUrl,
     publishableKey: supabaseAnonKey,

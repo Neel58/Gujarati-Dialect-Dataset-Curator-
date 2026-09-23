@@ -23,7 +23,7 @@ final promptsProvider = FutureProvider<List<Prompt>>((ref) async {
         .select('prompt_id')
         .eq('user_id', user.id);
         
-    final recordedIds = recordedData.map((e) => e['prompt_id'] as int).toSet();
+    final recordedIds = recordedData.map((e) => e['prompt_id'].toString()).toSet();
     
     // Sort: unrecorded first
     prompts.sort((a, b) {
