@@ -245,7 +245,7 @@ CREATE POLICY "Allow admins to read legacy recordings" ON recordings FOR SELECT 
 
 -- 9. STORAGE UPDATES
 UPDATE storage.buckets 
-SET public = false, file_size_limit = 5242880, allowed_mime_types = ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4']
+SET public = false, file_size_limit = 5242880, allowed_mime_types = ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/webm', 'video/webm', 'audio/ogg']
 WHERE id = 'audio-clips';
 
 -- Replace storage policies

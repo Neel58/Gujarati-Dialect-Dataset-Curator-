@@ -168,22 +168,31 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
     setState(() => _state = RecordState.uploading);
     try {
       Uint8List fileBytes;
+      String contentType = 'audio/wav';
+      String ext = '.wav';
+
       if (kIsWeb) {
         final res = await http.get(Uri.parse(_recordedPath!));
         fileBytes = res.bodyBytes;
+        if (res.headers['content-type'] != null) {
+          contentType = res.headers['content-type']!;
+          if (contentType.contains('webm')) ext = '.webm';
+          else if (contentType.contains('mp4')) ext = '.mp4';
+          else if (contentType.contains('ogg')) ext = '.ogg';
+        }
       } else {
         fileBytes = await io.File(_recordedPath!).readAsBytes();
       }
       
       final uuid = const Uuid().v4();
-      final storagePath = '${widget.profile.id}/$uuid.wav';
+      final storagePath = '${widget.profile.id}/$uuid$ext';
 
       // 1. Upload file
       await Supabase.instance.client.storage.from('audio-clips').uploadBinary(
         storagePath,
         fileBytes,
-        fileOptions: const FileOptions(
-          contentType: 'audio/wav',
+        fileOptions: FileOptions(
+          contentType: contentType,
           upsert: false,
         ),
       );

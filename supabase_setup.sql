@@ -242,11 +242,11 @@ CREATE POLICY "Allow admins to read legacy recordings" ON recordings FOR SELECT 
 
 -- 9. STORAGE
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-VALUES ('audio-clips', 'audio-clips', false, 5242880, ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4'])
+VALUES ('audio-clips', 'audio-clips', false, 5242880, ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/webm', 'video/webm', 'audio/ogg'])
 ON CONFLICT (id) DO UPDATE SET 
     public = false, 
     file_size_limit = 5242880, 
-    allowed_mime_types = ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4'];
+    allowed_mime_types = ARRAY['audio/wav', 'audio/x-wav', 'audio/mp4', 'audio/webm', 'video/webm', 'audio/ogg'];
 
 -- Storage Object Policies
 DROP POLICY IF EXISTS "Allow upload of audio clips" ON storage.objects;
