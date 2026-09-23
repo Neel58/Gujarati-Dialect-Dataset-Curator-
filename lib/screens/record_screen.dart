@@ -4,6 +4,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -166,7 +167,13 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
 
     setState(() => _state = RecordState.uploading);
     try {
-      final fileBytes = kIsWeb ? Uint8List(0) : await io.File(_recordedPath!).readAsBytes();
+      Uint8List fileBytes;
+      if (kIsWeb) {
+        final res = await http.get(Uri.parse(_recordedPath!));
+        fileBytes = res.bodyBytes;
+      } else {
+        fileBytes = await io.File(_recordedPath!).readAsBytes();
+      }
       
       final uuid = const Uuid().v4();
       final storagePath = '${widget.profile.id}/$uuid.wav';

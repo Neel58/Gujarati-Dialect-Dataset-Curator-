@@ -9,8 +9,12 @@ class WavRecorder {
   Future<bool> hasPermission() => _recorder.hasPermission();
 
   Future<String> start() async {
-    final dir = await getTemporaryDirectory();
-    _path = '${dir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
+    if (!kIsWeb) {
+      final dir = await getTemporaryDirectory();
+      _path = '${dir.path}/rec_${DateTime.now().millisecondsSinceEpoch}.wav';
+    } else {
+      _path = ''; // path is ignored on web
+    }
 
     // We only use standard record plugin for now, and fallback logic if encoder is unsupported.
     // For web, wav isn't always supported natively by MediaRecorder, but we will try.
