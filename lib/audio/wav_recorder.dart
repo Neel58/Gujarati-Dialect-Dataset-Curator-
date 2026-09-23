@@ -4,8 +4,6 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:record/record.dart';
 import 'package:path_provider/path_provider.dart';
-import 'sample_rate_helper.dart';
-import 'resampler.dart';
 import 'wav_builder.dart';
 
 class WavRecorder {
@@ -105,39 +103,18 @@ class WavRecorder {
         throw Exception("No audio data captured.");
       }
       
-      int actualRate = getWebHardwareSampleRate();
-      if (actualRate <= 0) {
-        // Fallback to timing estimation
-        final durationSecs = stopTime.difference(_webStartTime!).inMilliseconds / 1000.0;
-        final numSamples = pcmBytes.length / 2;
-        final estimatedRate = numSamples / durationSecs;
-        
-        // Find nearest standard rate
-        final standardRates = [16000, 44100, 48000];
-        int bestRate = 16000;
-        double minDiff = double.infinity;
-        
-        for (var rate in standardRates) {
-          final diff = (estimatedRate - rate).abs() / rate;
-          if (diff < minDiff) {
-            minDiff = diff;
-            bestRate = rate;
-          }
-        }
-        
-        if (minDiff <= 0.03) {
-          actualRate = bestRate;
-        } else {
-          throw Exception("Unable to determine sample rate securely. Estimated rate: ${estimatedRate.toStringAsFixed(1)}");
+      final durationSecs = stopTime.difference(_webStartTime!).inMilliseconds / 1000.0;
+      final numSamples = pcmBytes.length / 2;
+      final expectedDuration = numSamples / 16000.0;
+      
+      if (durationSecs > 0) {
+        final diffRatio = (expectedDuration - durationSecs).abs() / durationSecs;
+        if (diffRatio > 0.20) {
+          throw Exception("Recording failed, please try again.");
         }
       }
       
-      Uint8List finalPcm = pcmBytes;
-      if (actualRate != 16000) {
-        finalPcm = resamplePcm16(pcmBytes, actualRate, 16000);
-      }
-      
-      webWavBytes = buildWav(pcmBytes: finalPcm, sampleRate: 16000, channels: 1);
+      webWavBytes = buildWav(pcmBytes: pcmBytes, sampleRate: 16000, channels: 1);
       
       return 'memory';
     } else {
