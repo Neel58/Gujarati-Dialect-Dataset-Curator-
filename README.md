@@ -1,67 +1,37 @@
-# Gujarati Dialect Curator
+# Gujarati Dialect Dataset Curator
 
-Flutter app that shows a Gujarati prompt, records a contributor reading it aloud,
-collects metadata (name, age, place, dialect), and uploads both to Supabase.
+A Flutter application built with Supabase for crowdsourcing and curating high-quality audio recordings across various Gujarati dialects.
 
-## 1. Create the Supabase project (5 min)
+## Features
+- **Strict Audio Validation**: Records in 16-bit 16kHz Mono WAV, parsing binary headers client-side before uploading.
+- **Dialect Filtering**: Users onboard with a primary dialect, which cascades into the recording UI and prompt submissions.
+- **User Prompts**: Volunteers can submit custom sentences, which are validated for Gujarati script density (>= 50%).
+- **Private Audio Bucket**: Audio blobs are private; users stream their own uploads via 1-hour signed URLs. Admins can view and stream all uploads.
 
-1. Go to https://supabase.com → New project (free tier, no card needed).
-2. Once created, go to **SQL Editor** → paste the contents of `supabase_setup.sql` → Run.
-   This creates the `recordings` metadata table with RLS policies open enough for a demo.
-3. Go to **Storage** → Create a new bucket named exactly `audio-clips` → mark it **Public**
-   (so playback URLs work without extra auth for the demo).
-4. Go to **Project Settings → API** → copy:
-   - `Project URL`
-   - `anon public` key
+## Setup Instructions
 
-## 2. Wire up the app
+### 1. Database & Storage (Supabase)
+1. Create a new Supabase project.
+2. Run the `supabase_setup.sql` script in the Supabase SQL Editor. This will provision all tables, configure RLS, create the `audio-clips` storage bucket (set to PRIVATE), and insert necessary database triggers.
+3. For local development or quick testing, disable "Confirm email" in the Supabase Auth Settings. Otherwise, users will need a valid email to sign in.
+4. To grant yourself admin access, sign up in the app, then run the following in the SQL Editor:
+   ```sql
+   UPDATE profiles SET is_admin = true WHERE id = 'YOUR_UUID_HERE';
+   ```
 
-Open `lib/services/supabase_service.dart` and replace:
+### 2. Flutter Environment
+You must inject the Supabase credentials at compile-time using `--dart-define`. **Do not hardcode keys in source files.**
 
-```dart
-const String kSupabaseUrl = 'https://YOUR-PROJECT-REF.supabase.co';
-const String kSupabaseAnonKey = 'YOUR-ANON-PUBLIC-KEY';
-```
-
-with the values from step 1.
-
-## 3. Install and run
-
+To run the app locally:
 ```bash
-flutter pub get
-flutter run
+flutter run --dart-define=SUPABASE_URL="https://YOUR_PROJECT.supabase.co" --dart-define=SUPABASE_ANON_KEY="YOUR_ANON_KEY"
 ```
 
-### Android permissions
-Add to `android/app/src/main/AndroidManifest.xml` (inside `<manifest>`, above `<application>`):
+### 3. Permissions
+Ensure your testing device/emulator has microphone permissions granted.
+- **Android**: `<uses-permission android:name="android.permission.RECORD_AUDIO" />` is required in the manifest.
 
-```xml
-<uses-permission android:name="android.permission.RECORD_AUDIO"/>
-<uses-permission android:name="android.permission.INTERNET"/>
-```
-
-### iOS permissions
-Add to `ios/Runner/Info.plist`:
-
-```xml
-<key>NSMicrophoneUsageDescription</key>
-<string>This app needs microphone access to record dialect samples.</string>
-```
-
-## How it works
-
-- `lib/data/prompts.dart` — the list of Gujarati sentences shown to contributors.
-  Edit this list to add your own prompts.
-- Home screen → tap a prompt → record screen: record audio, fill in
-  name/age/place/dialect, submit.
-- On submit: audio uploads to the `audio-clips` bucket as `.m4a`, and a row goes
-  into the `recordings` table with the storage path.
-- "Review uploads" (top-right icon on home screen) lists every submission and lets
-  you play it back inline — this is the screen to show your teacher.
-
-## Known limits (be upfront about these if asked)
-
-- Supabase free tier: 1 GB storage, projects auto-pause after 7 days of no activity.
-  Fine for a demo, not for real crowdsourcing at scale.
-- RLS policies here allow anyone with the anon key to insert/read — acceptable for
-  a classroom demo, not for a public release. Lock this down before wider distribution.
+## Known Limits
+- **Max Audio Length**: Recordings are hard-capped at 30 seconds.
+- **Prompt Submissions**: Rate-limited to 20 prompts per user per 24 hours.
+- **Bucket Restrictions**: Max file size is 5MB, strictly accepting `audio/wav`, `audio/x-wav`, and `audio/mp4`.
