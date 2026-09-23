@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
+import '../utils/validators.dart';
 import 'onboarding_screen.dart';
 
 class AddPromptScreen extends ConsumerStatefulWidget {
@@ -24,13 +25,6 @@ class _AddPromptScreenState extends ConsumerState<AddPromptScreen> {
     _promptCtrl.dispose();
     _standardCtrl.dispose();
     super.dispose();
-  }
-
-  bool _isGujaratiValid(String text) {
-    final norm = text.replaceAll(RegExp(r'\s'), '');
-    if (norm.isEmpty) return false;
-    final gujChars = norm.replaceAll(RegExp(r'[^઀-૿]'), '');
-    return (gujChars.length / norm.length) >= 0.5;
   }
 
   String _mapError(dynamic e) {
@@ -111,7 +105,7 @@ class _AddPromptScreenState extends ConsumerState<AddPromptScreen> {
                 maxLength: 200,
                 validator: (v) {
                   if (v == null || v.trim().length < 5) return 'Minimum 5 characters';
-                  if (!_isGujaratiValid(v)) return 'Must be at least 50% Gujarati script';
+                  if (!Validators.isGujaratiValid(v)) return 'Must be at least 50% Gujarati script';
                   return null;
                 },
                 onChanged: (_) => setState(() {}),

@@ -8,11 +8,33 @@ import 'onboarding_screen.dart'; // for dialect provider
 import 'add_prompt_screen.dart';
 
 final promptsProvider = FutureProvider<List<Prompt>>((ref) async {
+  final user = Supabase.instance.client.auth.currentUser;
+  
   final data = await Supabase.instance.client
       .from('prompts')
       .select()
       .eq('status', 'approved');
-  return data.map((json) => Prompt.fromJson(json)).toList();
+      
+  final prompts = data.map((json) => Prompt.fromJson(json)).toList();
+  
+  if (user != null) {
+    final recordedData = await Supabase.instance.client
+        .from('recordings')
+        .select('prompt_id')
+        .eq('user_id', user.id);
+        
+    final recordedIds = recordedData.map((e) => e['prompt_id'] as int).toSet();
+    
+    // Sort: unrecorded first
+    prompts.sort((a, b) {
+      final aRecorded = recordedIds.contains(a.id);
+      final bRecorded = recordedIds.contains(b.id);
+      if (aRecorded == bRecorded) return a.id.compareTo(b.id);
+      return aRecorded ? 1 : -1;
+    });
+  }
+  
+  return prompts;
 });
 
 class HomeScreen extends ConsumerStatefulWidget {
