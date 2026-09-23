@@ -1,10 +1,8 @@
 import 'dart:io' as io;
-import 'dart:typed_data';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
@@ -167,32 +165,17 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
 
     setState(() => _state = RecordState.uploading);
     try {
-      Uint8List fileBytes;
-      String contentType = 'audio/wav';
-      String ext = '.wav';
-
-      if (kIsWeb) {
-        final res = await http.get(Uri.parse(_recordedPath!));
-        fileBytes = res.bodyBytes;
-        if (res.headers['content-type'] != null) {
-          contentType = res.headers['content-type']!;
-          if (contentType.contains('webm')) ext = '.webm';
-          else if (contentType.contains('mp4')) ext = '.mp4';
-          else if (contentType.contains('ogg')) ext = '.ogg';
-        }
-      } else {
-        fileBytes = await io.File(_recordedPath!).readAsBytes();
-      }
+      final fileBytes = await io.File(_recordedPath!).readAsBytes();
       
       final uuid = const Uuid().v4();
-      final storagePath = '${widget.profile.id}/$uuid$ext';
+      final storagePath = '${widget.profile.id}/$uuid.wav';
 
       // 1. Upload file
       await Supabase.instance.client.storage.from('audio-clips').uploadBinary(
         storagePath,
         fileBytes,
-        fileOptions: FileOptions(
-          contentType: contentType,
+        fileOptions: const FileOptions(
+          contentType: 'audio/wav',
           upsert: false,
         ),
       );
@@ -323,18 +306,28 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
             ),
 
             const SizedBox(height: 40),
-            _buildRecordButton(),
-            const SizedBox(height: 40),
-            if (_state == RecordState.recorded || _state == RecordState.uploading)
-              FilledButton(
-                onPressed: _state == RecordState.uploading ? null : _submit,
-                child: _state == RecordState.uploading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Submit Recording'),
+            if (kIsWeb) ...[
+              const Icon(Icons.mobile_off, size: 64, color: Colors.grey),
+              const SizedBox(height: 16),
+              const Text(
+                'Recording is supported in the Android and iOS apps only. You can browse prompts and add new prompts here.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey, fontSize: 16),
               ),
+            ] else ...[
+              _buildRecordButton(),
+              const SizedBox(height: 40),
+              if (_state == RecordState.recorded || _state == RecordState.uploading)
+                FilledButton(
+                  onPressed: _state == RecordState.uploading ? null : _submit,
+                  child: _state == RecordState.uploading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      : const Text('Submit Recording'),
+                ),
+            ],
           ],
         ),
       ),
