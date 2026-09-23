@@ -9,6 +9,7 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../audio/wav_recorder.dart';
 import '../audio/wav_info.dart';
+import 'package:audioplayers/audioplayers.dart';
 import 'onboarding_screen.dart'; // for providers
 
 class RecordScreen extends ConsumerStatefulWidget {
@@ -43,6 +44,9 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
   Timer? _stopTimer;
   DateTime? _startTime;
 
+  final AudioPlayer _player = AudioPlayer();
+  bool _isPlaying = false;
+
   @override
   void initState() {
     super.initState();
@@ -56,6 +60,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
     _ampSub?.cancel();
     _stopTimer?.cancel();
     _recorder.dispose();
+    _player.dispose();
     _otherDialectCtrl.dispose();
     super.dispose();
   }
@@ -126,19 +131,20 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
       }
 
       // Parse WAV Header
+      Uint8List bytes;
       if (!kIsWeb) {
-        final bytes = await io.File(path).readAsBytes();
-        try {
-          _wavInfo = parseWavHeader(bytes);
-        } catch (e) {
-          _showSnack('Audio validation failed: $e');
-          _cleanupTempFile();
-          setState(() => _state = RecordState.idle);
-          return;
-        }
+        bytes = await io.File(path).readAsBytes();
       } else {
-        // Mock info for web since it might be webm/opus
-        _wavInfo = WavInfo(durationMs: duration.inMilliseconds, sampleRate: 16000, channels: 1);
+        bytes = _recorder.webWavBytes!;
+      }
+      
+      try {
+        _wavInfo = parseWavHeader(bytes);
+      } catch (e) {
+        _showSnack('Audio validation failed: $e');
+        _cleanupTempFile();
+        setState(() => _state = RecordState.idle);
+        return;
       }
 
       setState(() {
@@ -165,7 +171,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
 
     setState(() => _state = RecordState.uploading);
     try {
-      final fileBytes = await io.File(_recordedPath!).readAsBytes();
+      final fileBytes = kIsWeb ? _recorder.webWavBytes! : await io.File(_recordedPath!).readAsBytes();
       
       final uuid = const Uuid().v4();
       final storagePath = '${widget.profile.id}/$uuid.wav';
@@ -219,6 +225,28 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
   void _showSnack(String msg) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+  }
+
+  Future<void> _togglePlay() async {
+    if (_isPlaying) {
+      await _player.stop();
+      setState(() => _isPlaying = false);
+    } else {
+      try {
+        if (kIsWeb) {
+          await _player.play(BytesSource(_recorder.webWavBytes!));
+        } else {
+          await _player.play(DeviceFileSource(_recordedPath!));
+        }
+        setState(() => _isPlaying = true);
+        _player.onPlayerComplete.first.then((_) {
+          if (mounted) setState(() => _isPlaying = false);
+        });
+      } catch (e) {
+        _showSnack('Play error: $e');
+        setState(() => _isPlaying = false);
+      }
+    }
   }
 
   @override
@@ -306,28 +334,30 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
             ),
 
             const SizedBox(height: 40),
-            if (kIsWeb) ...[
-              const Icon(Icons.mobile_off, size: 64, color: Colors.grey),
-              const SizedBox(height: 16),
-              const Text(
-                'Recording is supported in the Android and iOS apps only. You can browse prompts and add new prompts here.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey, fontSize: 16),
+            _buildRecordButton(),
+            const SizedBox(height: 40),
+            if (_state == RecordState.recorded || _state == RecordState.uploading)
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  IconButton(
+                    icon: Icon(_isPlaying ? Icons.stop : Icons.play_arrow),
+                    iconSize: 48,
+                    color: Theme.of(context).colorScheme.primary,
+                    onPressed: _state == RecordState.uploading ? null : _togglePlay,
+                  ),
+                  const SizedBox(width: 20),
+                  FilledButton(
+                    onPressed: _state == RecordState.uploading ? null : _submit,
+                    child: _state == RecordState.uploading
+                        ? const SizedBox(
+                            height: 20,
+                            width: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        : const Text('Submit Recording'),
+                  ),
+                ],
               ),
-            ] else ...[
-              _buildRecordButton(),
-              const SizedBox(height: 40),
-              if (_state == RecordState.recorded || _state == RecordState.uploading)
-                FilledButton(
-                  onPressed: _state == RecordState.uploading ? null : _submit,
-                  child: _state == RecordState.uploading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Submit Recording'),
-                ),
-            ],
           ],
         ),
       ),
