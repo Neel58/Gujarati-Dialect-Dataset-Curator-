@@ -203,13 +203,24 @@ ALTER TABLE prompts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE prompt_reports ENABLE ROW LEVEL SECURITY;
 ALTER TABLE recordings ENABLE ROW LEVEL SECURITY;
 
+-- Helper function to break infinite recursion on admin checks
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS boolean AS $$
+BEGIN
+  RETURN EXISTS (
+    SELECT 1 FROM public.profiles
+    WHERE id = auth.uid() AND is_admin = true
+  );
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
 -- Dialects & Districts: Select for authenticated
 CREATE POLICY "Allow select on dialects for authenticated" ON dialects FOR SELECT TO authenticated USING (true);
 CREATE POLICY "Allow select on districts for authenticated" ON districts FOR SELECT TO authenticated USING (true);
 
 -- Profiles
 CREATE POLICY "Allow users to read own profile" ON profiles FOR SELECT TO authenticated USING (auth.uid() = id);
-CREATE POLICY "Allow admins to read all profiles" ON profiles FOR SELECT TO authenticated USING ((SELECT is_admin FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Allow admins to read all profiles" ON profiles FOR SELECT TO authenticated USING (public.is_admin());
 CREATE POLICY "Allow users to insert own profile" ON profiles FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
 CREATE POLICY "Allow users to update own profile" ON profiles FOR UPDATE TO authenticated USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
 
@@ -217,7 +228,7 @@ CREATE POLICY "Allow users to update own profile" ON profiles FOR UPDATE TO auth
 CREATE POLICY "Allow authenticated to read approved prompts" ON prompts FOR SELECT TO authenticated USING (status = 'approved');
 CREATE POLICY "Allow authenticated to read own prompts" ON prompts FOR SELECT TO authenticated USING (auth.uid() = submitted_by);
 CREATE POLICY "Allow authenticated to insert prompts" ON prompts FOR INSERT TO authenticated WITH CHECK (auth.uid() = submitted_by);
-CREATE POLICY "Allow admins to read all prompts" ON prompts FOR SELECT TO authenticated USING ((SELECT is_admin FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Allow admins to read all prompts" ON prompts FOR SELECT TO authenticated USING (public.is_admin());
 
 -- Prompt Reports
 CREATE POLICY "Allow users to insert own reports" ON prompt_reports FOR INSERT TO authenticated WITH CHECK (auth.uid() = reporter_id);
@@ -226,8 +237,8 @@ CREATE POLICY "Allow users to insert own reports" ON prompt_reports FOR INSERT T
 CREATE POLICY "Allow users to read own recordings" ON recordings FOR SELECT TO authenticated USING (auth.uid() = user_id);
 CREATE POLICY "Allow users to delete own recordings" ON recordings FOR DELETE TO authenticated USING (auth.uid() = user_id);
 CREATE POLICY "Allow users to insert own recordings" ON recordings FOR INSERT TO authenticated WITH CHECK (auth.uid() = user_id);
-CREATE POLICY "Allow admins to read all recordings" ON recordings FOR SELECT TO authenticated USING ((SELECT is_admin FROM profiles WHERE id = auth.uid()));
-CREATE POLICY "Allow admins to read legacy recordings" ON recordings FOR SELECT TO authenticated USING (user_id IS NULL AND (SELECT is_admin FROM profiles WHERE id = auth.uid()));
+CREATE POLICY "Allow admins to read all recordings" ON recordings FOR SELECT TO authenticated USING (public.is_admin());
+CREATE POLICY "Allow admins to read legacy recordings" ON recordings FOR SELECT TO authenticated USING (user_id IS NULL AND public.is_admin());
 
 -- 9. STORAGE
 INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
@@ -266,5 +277,5 @@ CREATE POLICY "Allow admins to read all audio" ON storage.objects
 FOR SELECT TO authenticated
 USING (
     bucket_id = 'audio-clips' AND 
-    (SELECT is_admin FROM public.profiles WHERE id = auth.uid())
+    public.is_admin()
 );
