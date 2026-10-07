@@ -9,17 +9,21 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/models.dart';
 import '../audio/wav_recorder.dart';
 import '../audio/wav_info.dart';
+import '../data/repositories/gsip_repository.dart';
+import '../services/quality_engine.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'onboarding_screen.dart'; // for providers
 
 class RecordScreen extends ConsumerStatefulWidget {
   final Prompt prompt;
   final Profile profile;
+  final String? missionId;
   
   const RecordScreen({
     super.key, 
     required this.prompt,
     required this.profile,
+    this.missionId,
   });
 
   @override
@@ -205,6 +209,41 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
 
       try {
         await Supabase.instance.client.from('recordings').insert(recording.toJson());
+
+        // Canonical DataAsset creation with automated quality analysis
+        try {
+          final qualityAnalysis = QualityEngine.analyze(
+            wavBytes: fileBytes,
+            hasTranscript: widget.prompt.textGu.isNotEmpty,
+            hasDialect: true,
+            hasDistrict: true,
+            consentType: 'research_only',
+          );
+
+          final asset = await GsipRepository().createDataAsset(
+            recordingId: uuid,
+            transcript: widget.prompt.textGu,
+            dialectId: _selectedDialect?.id,
+            domainId: 'general',
+            durationMs: _wavInfo?.durationMs,
+            sampleRate: _wavInfo?.sampleRate,
+            channels: _wavInfo?.channels,
+            fileSizeBytes: fileBytes.length,
+            audioFormat: 'wav',
+            storagePath: storagePath,
+            consentTypeId: 'research_only',
+            qualityAnalysis: qualityAnalysis,
+          );
+
+          if (widget.missionId != null) {
+            await GsipRepository().submitToMission(
+              missionId: widget.missionId!,
+              dataAssetId: asset.id,
+            );
+          }
+        } catch (assetErr) {
+          debugPrint('Notice: Canonical data_asset creation/submission result: $assetErr');
+        }
       } catch (e) {
         // If row insert fails, delete uploaded object
         await Supabase.instance.client.storage.from('audio-clips').remove([storagePath]);
@@ -306,7 +345,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
                     : (v) => setState(() => _selectedDialect = v),
               ),
               loading: () => const LinearProgressIndicator(),
-              error: (_, __) => const Text('Error loading dialects'),
+              error: (_, _) => const Text('Error loading dialects'),
             ),
             if (_selectedDialect?.slug == 'other') ...[
               const SizedBox(height: 12),
@@ -330,7 +369,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
                     : (v) => setState(() => _selectedDistrict = v),
               ),
               loading: () => const LinearProgressIndicator(),
-              error: (_, __) => const Text('Error loading districts'),
+              error: (_, _) => const Text('Error loading districts'),
             ),
 
             const SizedBox(height: 40),

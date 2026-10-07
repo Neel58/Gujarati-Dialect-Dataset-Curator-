@@ -41,7 +41,7 @@ class GujaratiDialectApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Gujarati Dialect Curator',
+      title: 'Gujarati Speech Intelligence Platform',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         colorSchemeSeed: Colors.deepPurple,

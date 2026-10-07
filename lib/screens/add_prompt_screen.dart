@@ -122,7 +122,7 @@ class _AddPromptScreenState extends ConsumerState<AddPromptScreen> {
                   onChanged: (v) => setState(() => _selectedDialect = v),
                 ),
                 loading: () => const LinearProgressIndicator(),
-                error: (_, __) => const Text('Error loading dialects'),
+                error: (_, _) => const Text('Error loading dialects'),
               ),
               const SizedBox(height: 16),
               TextFormField(

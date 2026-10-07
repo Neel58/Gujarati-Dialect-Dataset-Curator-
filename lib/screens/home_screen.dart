@@ -6,6 +6,12 @@ import 'review_screen.dart';
 import 'record_screen.dart';
 import 'onboarding_screen.dart'; // for dialect provider
 import 'add_prompt_screen.dart';
+import 'missions_screen.dart';
+import 'coverage_gaps_screen.dart';
+import 'dataset_builder_screen.dart';
+import 'benchmark_eval_screen.dart';
+import 'curator_review_screen.dart';
+import 'projects_screen.dart';
 
 final promptsProvider = FutureProvider<List<Prompt>>((ref) async {
   final user = Supabase.instance.client.auth.currentUser;
@@ -45,6 +51,7 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen> {
+  int _currentNavIndex = 0;
   int? _selectedDialectFilter;
   Profile? _cachedProfile;
 
@@ -93,30 +100,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
+  Widget _buildPromptsTab(BuildContext context) {
     final promptsAsync = ref.watch(promptsProvider);
     final dialectsAsync = ref.watch(dialectsProvider);
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Gujarati Dialect Curator'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.person),
-            tooltip: 'Edit Profile',
-            onPressed: () => _editProfile(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.list_alt),
-            tooltip: 'My Uploads',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const ReviewScreen()),
-            ),
-          ),
-        ],
-      ),
       floatingActionButton: FloatingActionButton(
+        tooltip: 'Submit Gujarati Prompt',
         child: const Icon(Icons.add),
         onPressed: () async {
           if (_cachedProfile == null) return;
@@ -135,7 +125,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               child: Row(
                 children: [
                   FilterChip(
-                    label: const Text('All'),
+                    label: const Text('All Dialects'),
                     selected: _selectedDialectFilter == null,
                     onSelected: (val) => setState(() => _selectedDialectFilter = null),
                   ),
@@ -152,7 +142,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               ),
             ),
             loading: () => const SizedBox(),
-            error: (_, __) => const SizedBox(),
+            error: (_, _) => const SizedBox(),
           ),
           Expanded(
             child: promptsAsync.when(
@@ -187,7 +177,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   child: ListView.separated(
                     padding: const EdgeInsets.all(12),
                     itemCount: filtered.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 8),
+                    separatorBuilder: (_, _) => const SizedBox(height: 8),
                     itemBuilder: (context, index) {
                       final prompt = filtered[index];
                       
@@ -235,6 +225,87 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text(
+          'Gujarati Speech Intelligence',
+          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
+        ),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.assignment_outlined),
+            tooltip: 'Data Requirement Projects',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ProjectsScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.rate_review_outlined),
+            tooltip: 'Curation Review Queue',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const CuratorReviewScreen()),
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.person),
+            tooltip: 'Edit Profile',
+            onPressed: () => _editProfile(context),
+          ),
+          IconButton(
+            icon: const Icon(Icons.list_alt),
+            tooltip: 'My Uploads',
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ReviewScreen()),
+            ),
+          ),
+        ],
+      ),
+      body: IndexedStack(
+        index: _currentNavIndex,
+        children: [
+          _buildPromptsTab(context),
+          MissionsScreen(profile: _cachedProfile),
+          const CoverageGapsScreen(),
+          const DatasetBuilderScreen(),
+          const BenchmarkEvalScreen(),
+        ],
+      ),
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _currentNavIndex,
+        onDestinationSelected: (idx) => setState(() => _currentNavIndex = idx),
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.mic_none),
+            selectedIcon: Icon(Icons.mic),
+            label: 'Record',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.flag_outlined),
+            selectedIcon: Icon(Icons.flag),
+            label: 'Missions',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.analytics_outlined),
+            selectedIcon: Icon(Icons.analytics),
+            label: 'Coverage',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.inventory_2_outlined),
+            selectedIcon: Icon(Icons.inventory_2),
+            label: 'Datasets',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.speed_outlined),
+            selectedIcon: Icon(Icons.speed),
+            label: 'Evaluate',
           ),
         ],
       ),
