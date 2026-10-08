@@ -9,8 +9,8 @@ import 'add_prompt_screen.dart';
 import 'missions_screen.dart';
 import 'coverage_gaps_screen.dart';
 import 'dataset_builder_screen.dart';
-import 'benchmark_eval_screen.dart';
 import 'curator_review_screen.dart';
+import 'login_screen.dart';
 import 'projects_screen.dart';
 
 final promptsProvider = FutureProvider<List<Prompt>>((ref) async {
@@ -266,6 +266,38 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
               MaterialPageRoute(builder: (_) => const ReviewScreen()),
             ),
           ),
+          IconButton(
+            icon: const Icon(Icons.logout),
+            tooltip: 'Sign Out',
+            onPressed: () async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Sign Out'),
+                  content: const Text('Are you sure you want to sign out?'),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel'),
+                    ),
+                    FilledButton(
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Sign Out'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed == true && context.mounted) {
+                await Supabase.instance.client.auth.signOut();
+                if (context.mounted) {
+                  Navigator.of(context).pushAndRemoveUntil(
+                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    (_) => false,
+                  );
+                }
+              }
+            },
+          ),
         ],
       ),
       body: IndexedStack(
@@ -275,7 +307,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           MissionsScreen(profile: _cachedProfile),
           const CoverageGapsScreen(),
           const DatasetBuilderScreen(),
-          const BenchmarkEvalScreen(),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -301,11 +332,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
             icon: Icon(Icons.inventory_2_outlined),
             selectedIcon: Icon(Icons.inventory_2),
             label: 'Datasets',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.speed_outlined),
-            selectedIcon: Icon(Icons.speed),
-            label: 'Evaluate',
           ),
         ],
       ),

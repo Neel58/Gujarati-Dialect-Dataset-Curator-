@@ -177,6 +177,39 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
     try {
       final fileBytes = kIsWeb ? _recorder.webWavBytes! : await io.File(_recordedPath!).readAsBytes();
       
+      bool qualitySubmissionFailed = false;
+      QualityAnalysis? qualityAnalysis;
+      try {
+        qualityAnalysis = QualityEngine.analyze(
+          wavBytes: fileBytes,
+          hasTranscript: widget.prompt.textGu.isNotEmpty,
+          hasDialect: true,
+          hasDistrict: true,
+          consentType: 'research_only',
+        );
+
+        if ((qualityAnalysis.overallQualityScore ?? 100) < 50) {
+          final shouldProceed = await showDialog<bool>(
+            context: context,
+            builder: (ctx) => AlertDialog(
+              title: const Text('Low Quality Audio Detected'),
+              content: Text('Overall score: ${qualityAnalysis!.overallQualityScore}/100.\nThis audio might be too quiet, noisy, or clipped. Would you like to retake it or submit anyway?'),
+              actions: [
+                TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Retake')),
+                FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Submit Anyway')),
+              ],
+            ),
+          );
+          if (shouldProceed != true) {
+            setState(() => _state = RecordState.recorded);
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('Local quality analysis failed: $e');
+        qualitySubmissionFailed = true;
+      }
+
       final uuid = const Uuid().v4();
       final storagePath = '${widget.profile.id}/$uuid.wav';
 
@@ -194,7 +227,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
       final recording = Recording(
         id: uuid,
         userId: widget.profile.id,
-        promptId: widget.prompt.id,
+        promptId: widget.missionId != null ? null : widget.prompt.id,
         promptText: widget.prompt.textGu,
         dialectId: _selectedDialect!.id,
         dialectOtherText: _selectedDialect!.slug == 'other' ? _otherDialectCtrl.text.trim() : null,
@@ -212,14 +245,6 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
 
         // Canonical DataAsset creation with automated quality analysis
         try {
-          final qualityAnalysis = QualityEngine.analyze(
-            wavBytes: fileBytes,
-            hasTranscript: widget.prompt.textGu.isNotEmpty,
-            hasDialect: true,
-            hasDistrict: true,
-            consentType: 'research_only',
-          );
-
           final asset = await GsipRepository().createDataAsset(
             recordingId: uuid,
             transcript: widget.prompt.textGu,
@@ -243,6 +268,7 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
           }
         } catch (assetErr) {
           debugPrint('Notice: Canonical data_asset creation/submission result: $assetErr');
+          qualitySubmissionFailed = true;
         }
       } catch (e) {
         // If row insert fails, delete uploaded object
@@ -253,8 +279,59 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
       // Success
       _cleanupTempFile();
       if (!mounted) return;
-      _showSnack('Uploaded successfully.');
-      Navigator.of(context).pop();
+      
+      if (qualitySubmissionFailed) {
+        _showSnack('Uploaded, but quality check couldn\'t run.');
+        Navigator.of(context).pop();
+      } else if (qualityAnalysis != null) {
+        showModalBottomSheet(
+          context: context,
+          isDismissible: false,
+          enableDrag: false,
+          builder: (ctx) => Container(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Uploaded successfully!', style: Theme.of(context).textTheme.titleLarge),
+                const SizedBox(height: 16),
+                Text('Quality Score: ${qualityAnalysis!.overallQualityScore}/100', 
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                const SizedBox(height: 12),
+                ...qualityAnalysis!.qualityExplanation.take(4).map(
+                  (e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(e.passed ? Icons.check_circle : Icons.warning, 
+                          color: e.passed ? Colors.green : Colors.orange, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(child: Text(e.message)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Done'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ).then((_) {
+          if (mounted) Navigator.of(context).pop();
+        });
+      } else {
+        _showSnack('Uploaded successfully.');
+        Navigator.of(context).pop();
+      }
+
     } catch (e) {
       _showSnack(e.toString());
       setState(() => _state = RecordState.recorded);
