@@ -188,12 +188,17 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
           consentType: 'research_only',
         );
 
-        if ((qualityAnalysis.overallQualityScore ?? 100) < 50) {
+        final qa = qualityAnalysis;
+        final isBadAudio = qa.speechPresence == false || 
+                           (qa.silenceRatio ?? 0) > 0.7 || 
+                           (qa.audioQualityScore ?? 100) < 50;
+
+        if (isBadAudio) {
           final shouldProceed = await showDialog<bool>(
             context: context,
             builder: (ctx) => AlertDialog(
               title: const Text('Low Quality Audio Detected'),
-              content: Text('Overall score: ${qualityAnalysis!.overallQualityScore}/100.\nThis audio might be too quiet, noisy, or clipped. Would you like to retake it or submit anyway?'),
+              content: Text('Audio score: ${qa.audioQualityScore}/100.\nThis audio might be too quiet, noisy, or clipped. Would you like to retake it or submit anyway?'),
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Retake')),
                 FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Submit Anyway')),
@@ -299,7 +304,17 @@ class _RecordScreenState extends ConsumerState<RecordScreen> {
                 Text('Quality Score: ${qualityAnalysis!.overallQualityScore}/100', 
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                 const SizedBox(height: 12),
-                ...qualityAnalysis!.qualityExplanation.take(4).map(
+                ...(() {
+                  final exps = qualityAnalysis!.qualityExplanation;
+                  final important = exps.where((e) => 
+                    !e.passed || 
+                    e.message.toLowerCase().contains('speech') || 
+                    e.message.toLowerCase().contains('silence') || 
+                    e.message.toLowerCase().contains('volume') || 
+                    e.message.toLowerCase().contains('clip')
+                  ).toList();
+                  return important.isNotEmpty ? important.take(4) : exps.take(4);
+                }()).map(
                   (e) => Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
                     child: Row(

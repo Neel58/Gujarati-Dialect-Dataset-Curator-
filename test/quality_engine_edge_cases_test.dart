@@ -143,5 +143,37 @@ void main() {
       );
       expect(partialMeta.metadataQualityScore, equals(80)); // 60 + 20
     });
+
+    test('Overall quality score floor masks complete silence, necessitating independent audio checks', () {
+      // 3 seconds of total silence (zeroes)
+      final pcm = Uint8List(16000 * 2 * 3);
+      final wavBytes = buildWav(pcmBytes: pcm, sampleRate: 16000, channels: 1);
+
+      final analysis = QualityEngine.analyze(
+        wavBytes: wavBytes,
+        hasTranscript: true,
+        hasDialect: true,
+        hasDistrict: true,
+        consentType: 'research_only',
+      );
+
+      // Confirm audio is flagged as completely bad
+      expect(analysis.speechPresence, isFalse);
+      expect(analysis.silenceRatio, greaterThan(0.9));
+      expect(analysis.audioQualityScore, lessThan(50));
+
+      // Confirm overall score still passes due to the blended floor!
+      // (100 metadata * 0.25) + (70 consent * 0.15) = 35.5
+      // Plus audio score of ~40 * 0.6 = 24.
+      // Total = ~60. This proves why pre-upload gate must check audioQualityScore directly.
+      expect(analysis.overallQualityScore, greaterThanOrEqualTo(50));
+
+      // This boolean logic matches the fix in record_screen.dart
+      final isBadAudio = analysis.speechPresence == false || 
+                         (analysis.silenceRatio ?? 0) > 0.7 || 
+                         (analysis.audioQualityScore ?? 100) < 50;
+                         
+      expect(isBadAudio, isTrue);
+    });
   });
 }
